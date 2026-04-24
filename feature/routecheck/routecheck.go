@@ -21,6 +21,7 @@ import (
 	"tailscale.com/net/routecheck"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/logger"
+	"tailscale.com/util/eventbus"
 )
 
 // FeatureName is the name of the feature implemented by this package.
@@ -42,6 +43,7 @@ type Extension struct {
 
 	logf    logger.Logf
 	backend ipnext.SafeBackend
+	ec      *eventbus.Client
 	nb      nodeBackender
 	nm      routecheck.NetMapper
 	routers *RouterTracker
@@ -87,6 +89,10 @@ func (e *Extension) Init(h ipnext.Host) error {
 	e.routers.OnNetMapAvailable = e.Client.NotifyNetMapAvailable
 	e.routers.OnRoutersChange = e.onRoutersChange
 
+	bus := e.backend.Sys().Bus.Get()
+	e.ec = bus.Client("routecheck")
+	eventbus.SubscribeFunc(e.ec, e.Client.WatchForNetMonRebind)
+
 	h.Hooks().OnSelfChange.Add(e.onSelfChange)
 
 	// Unlike a cold start, starting with a cached netmap
@@ -102,21 +108,15 @@ func (e *Extension) Init(h ipnext.Host) error {
 
 // Shutdown implements the [ipnext.Extension.Shutdown] interface method.
 func (e *Extension) Shutdown() error {
+	e.ec.Close()
 	e.routers.Close()
 	return e.Client.Close()
-}
-
-func (e *Extension) needsRefresh() {
-	if !routecheck.IsEnabled(e.nb.NodeBackend().Self()) {
-		return
-	}
-	// TODO(sfllaw): e.Client.NeedsRefresh()
 }
 
 func (e *Extension) onRoutersChange(added, modified, removed []tailcfg.NodeID) {
 	// TODO(sfllaw): This refresh could be incremental,
 	// based on the added, modified, and removed nodes.
-	e.needsRefresh()
+	e.Client.NeedsRefresh()
 }
 
 func (e *Extension) onSelfChange(self tailcfg.NodeView) {
@@ -132,6 +132,6 @@ func (e *Extension) onSelfChange(self tailcfg.NodeView) {
 			}
 			return // can be started by toggling the nodeattr
 		}
-		e.needsRefresh()
+		e.Client.NeedsRefresh()
 	}()
 }

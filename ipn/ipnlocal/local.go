@@ -2517,6 +2517,9 @@ func (b *LocalBackend) UpdateNetmapDelta(muts []netmap.NodeMutation) (handled bo
 		}
 	}
 
+	// TODO(sfllaw): If [buildfeatures.HasRouteCheck] is enabled,
+	// a probe may be triggered for an updated routecheck reachability report,
+	// which should influence which exit nodes are considered valid to suggest.
 	if cn.NetMap() != nil && mutationsAreWorthyOfRecalculatingSuggestedExitNode(muts, cn, b.lastSuggestedExitNode) {
 		// Recompute the suggested exit node
 		b.suggestExitNodeLocked()
