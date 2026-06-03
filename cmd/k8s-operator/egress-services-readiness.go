@@ -119,6 +119,7 @@ func (esrr *egressSvcsReadinessReconciler) Reconcile(ctx context.Context, req re
 	}
 	podLabels := pgLabels(pg.Name, nil)
 	var readyReplicas int32
+nextReplica:
 	for i := range replicas {
 		podLabels[appsv1.PodIndexLabel] = fmt.Sprintf("%d", i)
 		pod, err := getSingleObject[corev1.Pod](ctx, esrr.Client, esrr.tsNamespace, podLabels)
@@ -134,19 +135,18 @@ func (esrr *egressSvcsReadinessReconciler) Reconcile(ctx context.Context, req re
 			return res, nil
 		}
 		lg.Debugf("looking at Pod with IPs %v", pod.Status.PodIPs)
+		// TODO - review
 		for _, eps := range epsList.Items {
-		ready := false
-			for _, ep := range eps.Endpoints {
-				lg.Debugf("looking at endpoint with addresses %v", ep.Addresses)
-				if endpointReadyForPod(&ep, pod, eps.AddressType, lg) {
-					lg.Debugf("endpoint is ready for Pod")
-					ready = true
-					break
-				}
+			lg.Debugf("looking at %s EndpointSlice %s", eps.AddressType, eps.Name)
+			if !slices.ContainsFunc(eps.Endpoints, func(ep discoveryv1.Endpoint) bool {
+				return endpointReadyForPod(&ep, pod, eps.AddressType, lg)
+			}) {
+				continue nextReplica
 			}
-			if ready {
-				readyReplicas++
-			}
+		}
+		lg.Debugf("endpoint is ready for Pod")
+		readyReplicas++
+	}
 	msg = fmt.Sprintf(msgReadyToRouteTemplate, readyReplicas, replicas)
 	if readyReplicas == 0 {
 		reason = reasonNotReady

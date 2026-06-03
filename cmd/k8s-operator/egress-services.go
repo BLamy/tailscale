@@ -337,7 +337,7 @@ func (esr *egressSvcsReconciler) provision(ctx context.Context, proxyGroupName s
 			AddressType: addrType,
 			Ports:       epsPortsFromSvc(clusterIPSvc),
 		}
-		if _, err = createOrUpdate(ctx, esr.Client, esr.tsNamespace, eps, func(e *discoveryv1.EndpointSlice) {
+		if eps, err = createOrUpdate(ctx, esr.Client, esr.tsNamespace, eps, func(e *discoveryv1.EndpointSlice) {
 			e.Labels = eps.Labels
 			e.AddressType = eps.AddressType
 			e.Ports = eps.Ports
