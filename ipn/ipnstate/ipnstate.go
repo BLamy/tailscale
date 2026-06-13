@@ -360,6 +360,32 @@ func (ps *PeerStatus) HasCap(cap tailcfg.NodeCapability) bool {
 	return ps.CapMap.Contains(cap)
 }
 
+// IsRouter reports whether ps describes a router:
+// a node that routes addresses besides its own.
+// Examples: an exit node, a subnet router, an app connector, etc.
+// It is the analogue of [tailcfg.Node.IsRouter].
+func (ps *PeerStatus) IsRouter() bool {
+	// TODO(sfllaw): Keep this aligned with dbx.Node.IsSubnetRouter.
+	if ps.AllowedIPs == nil {
+		return false
+	}
+
+	tailscaleIPs := make([]netip.Prefix, len(ps.TailscaleIPs))
+	for i, ip := range ps.TailscaleIPs {
+		p, err := ip.Prefix(ip.BitLen())
+		if err == nil {
+			tailscaleIPs[i] = p
+		}
+	}
+
+	for _, r := range ps.AllowedIPs.All() {
+		if !slices.Contains(tailscaleIPs, r) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsTagged reports whether ps is tagged.
 func (ps *PeerStatus) IsTagged() bool {
 	return ps.Tags != nil && ps.Tags.Len() > 0
