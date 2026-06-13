@@ -13,6 +13,7 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnext"
 	"tailscale.com/ipn/ipnlocal"
+	"tailscale.com/net/routecheck"
 	"tailscale.com/syncs"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/logger"
@@ -87,7 +88,8 @@ func (rt *RouterTracker) StartStopWatcher(self tailcfg.NodeView) (restarted, run
 	orig := rt.self
 	rt.self = self
 
-	if !ipnlocal.SameSelfNodeAndUser(orig, self) {
+	toggled := routecheck.IsEnabled(orig) != routecheck.IsEnabled(self)
+	if toggled || !ipnlocal.SameSelfNodeAndUser(orig, self) {
 		restarted = true
 		rt.stopWatcherLocked()
 		err = rt.startWatcherLocked(self)
@@ -107,6 +109,12 @@ func (rt *RouterTracker) startWatcherLocked(self tailcfg.NodeView) error {
 		return fmt.Errorf("cannot start, already watching IPN bus")
 	}
 
+	if !routecheck.IsEnabled(self) {
+		if !self.Valid() {
+			return routecheckNotEnabledErr
+		}
+		return fmt.Errorf("%w for %v on %v", routecheckNotEnabledErr, self.User(), self.ID())
+	}
 	rt.self = self
 
 	ctx, cancel := context.WithCancel(rt.ctx)

@@ -56,6 +56,10 @@ func (e *Extension) Name() string {
 
 // Init implements the [ipnext.Extension.Init] interface method.
 func (e *Extension) Init(h ipnext.Host) error {
+	if routecheck.DebugForceClientSideReachabilityRoutecheck().EqualBool(false) {
+		return ipnext.SkipExtension
+	}
+
 	ctx := context.Background()
 
 	e.nb = nodeBackender{h}
@@ -103,7 +107,10 @@ func (e *Extension) Shutdown() error {
 }
 
 func (e *Extension) needsRefresh() {
-	// TODO(sfllaw): Call e.Client.NeedsRefresh() after implementing it.
+	if !routecheck.IsEnabled(e.nb.NodeBackend().Self()) {
+		return
+	}
+	// TODO(sfllaw): e.Client.NeedsRefresh()
 }
 
 func (e *Extension) onRoutersChange(added, modified, removed []tailcfg.NodeID) {
