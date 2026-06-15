@@ -65,6 +65,7 @@ func (src *Prefs) Clone() *Prefs {
 		dst.RelayServerPort = new(*src.RelayServerPort)
 	}
 	dst.RelayServerStaticEndpoints = append(src.RelayServerStaticEndpoints[:0:0], src.RelayServerStaticEndpoints...)
+	dst.ServicePrefs = src.ServicePrefs.Clone()
 	dst.Persist = src.Persist.Clone()
 	return dst
 }
@@ -104,6 +105,7 @@ var _PrefsCloneNeedsRegeneration = Prefs(struct {
 	DriveShares                []*drive.Share
 	RelayServerPort            *uint16
 	RelayServerStaticEndpoints []netip.AddrPort
+	ServicePrefs               ServicePrefs
 	AllowSingleHosts           marshalAsTrueInJSON
 	Persist                    *persist.Persist
 }{})

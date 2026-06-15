@@ -70,6 +70,7 @@ func TestPrefsEqual(t *testing.T) {
 		"DriveShares",
 		"RelayServerPort",
 		"RelayServerStaticEndpoints",
+		"ServicePrefs",
 		"AllowSingleHosts",
 		"Persist",
 	}
@@ -388,6 +389,21 @@ func TestPrefsEqual(t *testing.T) {
 		{
 			&Prefs{RelayServerStaticEndpoints: aps("[2001:db8::1]:40000", "192.0.2.2:40000")},
 			&Prefs{RelayServerStaticEndpoints: aps("[2001:db8::1]:40000", "192.0.2.1:40000")},
+			false,
+		},
+		{
+			&Prefs{ServicePrefs: ServicePrefs{"svc:db:5432": {Client: "psql"}}},
+			&Prefs{ServicePrefs: ServicePrefs{"svc:db:5432": {Client: "psql"}}},
+			true,
+		},
+		{
+			&Prefs{ServicePrefs: ServicePrefs{"svc:db:5432": {Client: "psql"}}},
+			&Prefs{ServicePrefs: ServicePrefs{"svc:db:5432": {Client: "pgcli"}}},
+			false,
+		},
+		{
+			&Prefs{ServicePrefs: ServicePrefs{"svc:db:5432": {Client: "psql"}}},
+			&Prefs{ServicePrefs: ServicePrefs{"svc:other:5432": {Client: "psql"}}},
 			false,
 		},
 	}

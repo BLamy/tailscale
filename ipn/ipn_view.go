@@ -453,6 +453,13 @@ func (v PrefsView) RelayServerStaticEndpoints() views.Slice[netip.AddrPort] {
 	return views.SliceOf(v.ж.RelayServerStaticEndpoints)
 }
 
+// ServicePrefs holds the user's saved preferences for individual tailnet services
+// (saved client, saved username/DB name, last-used timestamp), keyed by
+// "<serviceName>:<port>". Used by the macOS and Windows trays' Services menu.
+func (v PrefsView) ServicePrefs() views.Map[string, ServicePref] {
+	return views.MapOf(v.ж.ServicePrefs)
+}
+
 // AllowSingleHosts was a legacy field that was always true
 // for the past 4.5 years. It controlled whether Tailscale
 // peers got /32 or /128 routes for each other.
@@ -506,6 +513,7 @@ var _PrefsViewNeedsRegeneration = Prefs(struct {
 	DriveShares                []*drive.Share
 	RelayServerPort            *uint16
 	RelayServerStaticEndpoints []netip.AddrPort
+	ServicePrefs               ServicePrefs
 	AllowSingleHosts           marshalAsTrueInJSON
 	Persist                    *persist.Persist
 }{})
