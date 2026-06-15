@@ -1370,22 +1370,15 @@ func (c *Client) addReportHistoryAndSetPreferredDERP(rs *reportState, r *Report,
 	c.prev[now] = r
 	c.last = r
 
+	// Drop reports outside the recency window, then take the best (lowest)
+	// latency seen per region across what remains.
 	const maxAge = 5 * time.Minute
-
-	// region ID => its best recent latency in last maxAge
-	bestRecent := map[int]time.Duration{}
-
-	for t, pr := range c.prev {
+	for t := range c.prev {
 		if now.Sub(t) > maxAge {
 			delete(c.prev, t)
-			continue
-		}
-		for regionID, d := range pr.RegionLatency {
-			if bd, ok := bestRecent[regionID]; !ok || d < bd {
-				bestRecent[regionID] = d
-			}
 		}
 	}
+	bestRecent := c.bestRecentLatencyLocked()
 
 	// Scale each region's best latency by any provided scores from the
 	// DERPMap, for use in comparison below.
@@ -1478,6 +1471,39 @@ func (c *Client) addReportHistoryAndSetPreferredDERP(rs *reportState, r *Report,
 	if r.PreferredDERP == 0 && prevRegionLastHeard.After(now.Add(-PreferredDERPKeepAliveTimeout)) {
 		r.PreferredDERP = prevDERP
 	}
+}
+
+// bestRecentLatencyLocked returns the lowest latency seen per DERP region across
+// the reports currently retained in history (c.prev), keyed by region ID. These
+// latencies are used for determining preferred DERP and suggesting an exit node.
+func (c *Client) bestRecentLatencyLocked() map[int]time.Duration {
+	best := make(map[int]time.Duration)
+	for _, pr := range c.prev {
+		for regionID, d := range pr.RegionLatency {
+			if bd, ok := best[regionID]; !ok || d < bd {
+				best[regionID] = d
+			}
+		}
+	}
+	return best
+}
+
+// RecentRegionLatency returns the lowest latency seen per DERP region over the
+// recent history window, keyed by region ID.
+func (c *Client) RecentRegionLatency() map[int]time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bestRecentLatencyLocked()
+}
+
+// AddReportHistoryForTest records r in the client's recent-report history
+// (prev/last) as if GetReport had produced it at time now, and recomputes
+// r.PreferredDERP from that history.
+func (c *Client) AddReportHistoryForTest(dm *tailcfg.DERPMap, r *Report, now time.Time) {
+	defer func(prev func() time.Time) { c.TimeNow = prev }(c.TimeNow)
+	c.TimeNow = func() time.Time { return now }
+	rs := &reportState{c: c, start: now}
+	c.addReportHistoryAndSetPreferredDERP(rs, r, dm.View())
 }
 
 func updateLatency(m map[int]time.Duration, regionID int, d time.Duration) {
