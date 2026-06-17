@@ -6,8 +6,10 @@ package set
 
 import (
 	"encoding/json"
+	"iter"
 	"maps"
 	"reflect"
+	"slices"
 	"sort"
 )
 
@@ -31,21 +33,37 @@ func (s Set[T]) Clone() Set[T] {
 	return maps.Clone(s)
 }
 
+// All returns an iterator over all elements in s.
+// The iteration order is not specified
+// and is not guaranteed to be the same from one call to the next.
+func (s Set[T]) All() iter.Seq[T] {
+	return maps.Keys(s)
+}
+
 // Add adds e to s.
 func (s Set[T]) Add(e T) { s[e] = struct{}{} }
 
-// AddSlice adds each element of es to s.
-func (s Set[T]) AddSlice(es []T) {
-	for _, e := range es {
+// AddSeq adds each element of es to s.
+func (s Set[T]) AddSeq(es iter.Seq[T]) {
+	for e := range es {
 		s.Add(e)
 	}
 }
 
+// AddSlice adds each element of es to s.
+// Deprecated: prefer calling [Set.AddSeq] with [slices.Values].
+//
+//go:fix inline
+func (s Set[T]) AddSlice(es []T) {
+	s.AddSeq(slices.Values(es))
+}
+
 // AddSet adds each element of es to s.
+// Deprecated: prefer calling [Set.AddSeq] with [Set.All].
+//
+//go:fix inline
 func (s Set[T]) AddSet(es Set[T]) {
-	for e := range es {
-		s.Add(e)
-	}
+	s.AddSeq(es.All())
 }
 
 // Make lazily initializes the map pointed to by s to be non-nil.
@@ -104,6 +122,13 @@ func genOrderedSwapper(rt reflect.Type) func(reflect.Value) func(i, j int) bool 
 
 // Delete removes e from the set.
 func (s Set[T]) Delete(e T) { delete(s, e) }
+
+// DeleteSeq removes es from the set.
+func (s Set[T]) DeleteSeq(es iter.Seq[T]) {
+	for e := range es {
+		s.Delete(e)
+	}
+}
 
 // Contains reports whether s contains e.
 func (s Set[T]) Contains(e T) bool {
