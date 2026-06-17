@@ -219,7 +219,7 @@ type sigRotationDetails struct {
 // addRotationDetails records the rotation signature details for a node key.
 func (r *rotationTracker) addRotationDetails(np key.NodePublic, d *tka.RotationDetails) {
 	r.obsolete.Make()
-	r.obsolete.AddSlice(d.PrevNodeKeys)
+	r.obsolete.AddSeq(slices.Values(d.PrevNodeKeys))
 	if d.InitialSig.SigKind != tka.SigDirect {
 		// Only enforce uniqueness of chains originating from a SigDirect
 		// signature. Chains that begin with a SigCredential can legitimately

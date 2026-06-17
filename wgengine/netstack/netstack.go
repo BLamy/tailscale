@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -711,7 +712,7 @@ func (ns *Impl) UpdateNetstackIPs(nm *netmap.NetworkMap) {
 			vipServiceIPMap := nm.GetVIPServiceIPMap()
 			serviceAddrSet = make(set.Set[netip.Addr], len(vipServiceIPMap)*2)
 			for _, addrs := range vipServiceIPMap {
-				serviceAddrSet.AddSlice(addrs)
+				serviceAddrSet.AddSeq(slices.Values(addrs))
 			}
 			ns.atomicIsVIPServiceIPFunc.Store(serviceAddrSet.Contains)
 		}

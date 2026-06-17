@@ -24,7 +24,7 @@ func SetOf[T comparable](slice []T) Set[T] {
 // Of returns a new set constructed from the elements in slice.
 func Of[T comparable](slice ...T) Set[T] {
 	s := make(Set[T])
-	s.AddSlice(slice)
+	s.AddSeq(slices.Values(slice))
 	return s
 }
 
@@ -51,7 +51,8 @@ func (s Set[T]) AddSeq(es iter.Seq[T]) {
 }
 
 // AddSlice adds each element of es to s.
-// Deprecated: prefer calling [Set.AddSeq] with [slices.Values].
+//
+// Prefer calling [Set.AddSeq] with [slices.Values].
 //
 //go:fix inline
 func (s Set[T]) AddSlice(es []T) {
@@ -59,7 +60,8 @@ func (s Set[T]) AddSlice(es []T) {
 }
 
 // AddSet adds each element of es to s.
-// Deprecated: prefer calling [Set.AddSeq] with [Set.All].
+//
+// Prefer calling [Set.AddSeq] with [Set.All].
 //
 //go:fix inline
 func (s Set[T]) AddSet(es Set[T]) {

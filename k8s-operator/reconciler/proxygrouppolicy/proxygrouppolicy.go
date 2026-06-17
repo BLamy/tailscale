@@ -11,6 +11,7 @@ package proxygrouppolicy
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -127,8 +128,8 @@ func (r *Reconciler) createOrUpdate(ctx context.Context, namespace string, polic
 	// If this namespace has multiple ProxyGroupPolicy resources, we'll reduce them down to just their distinct
 	// egress/ingress names.
 	for _, policy := range policies.Items {
-		ingressNames.AddSlice(policy.Spec.Ingress)
-		egressNames.AddSlice(policy.Spec.Egress)
+		ingressNames.AddSeq(slices.Values(policy.Spec.Ingress))
+		egressNames.AddSeq(slices.Values(policy.Spec.Egress))
 	}
 
 	ingress, err := r.generateIngressPolicy(ctx, namespace, ingressNames)

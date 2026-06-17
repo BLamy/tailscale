@@ -27,7 +27,7 @@ func TestSet(t *testing.T) {
 	}
 
 	more := []int{3, 4}
-	s.AddSlice(more)
+	s.AddSeq(slices.Values(more))
 	if !s.Contains(3) {
 		t.Error("missing 3")
 	}

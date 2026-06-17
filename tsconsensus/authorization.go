@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"net/netip"
+	"slices"
 	"sync"
 	"time"
 
@@ -144,7 +145,7 @@ func newPeers(status *ipnstate.Status, tag string) *peers {
 	for _, p := range status.Peer {
 		if p.Tags != nil && views.SliceContains(*p.Tags, tag) {
 			ps.statuses = append(ps.statuses, p)
-			ps.addrs.AddSlice(p.TailscaleIPs)
+			ps.addrs.AddSeq(slices.Values(p.TailscaleIPs))
 		}
 	}
 	return ps

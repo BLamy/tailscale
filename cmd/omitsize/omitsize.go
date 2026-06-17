@@ -120,7 +120,7 @@ func computeAdd(s set.Set[featuretags.FeatureTag]) (title string, tags []string)
 	allSet := set.Set[featuretags.FeatureTag]{} // s + all their outbound dependencies
 	var explicitSorted []string                 // string versions of s, sorted
 	for ft := range s {
-		allSet.AddSet(featuretags.Requires(ft))
+		allSet.AddSeq(featuretags.Requires(ft).All())
 		if ft.IsOmittable() {
 			explicitSorted = append(explicitSorted, string(ft))
 		}
@@ -157,7 +157,7 @@ func computeRemove(s set.Set[featuretags.FeatureTag]) (title string, tags []stri
 	allSet := set.Set[featuretags.FeatureTag]{} // s + all their inbound dependencies
 	var explicitSorted []string                 // string versions of s, sorted
 	for ft := range s {
-		allSet.AddSet(featuretags.RequiredBy(ft))
+		allSet.AddSeq(featuretags.RequiredBy(ft).All())
 		if ft.IsOmittable() {
 			explicitSorted = append(explicitSorted, string(ft))
 		}
