@@ -2175,6 +2175,33 @@ func packetLooksLike(msg []byte) (t packetLooksLikeType, isGeneveEncap bool) {
 	}
 }
 
+func (c *Conn) handleDiscoOpenFailOrUnknownSender(src epAddr, derpNodeSrc key.NodePublic) {
+	// Provide the sender of the disco message that failed to open with our
+	// current disco key if they appear to be a known node key.
+	var (
+		maybeSendDiscoKeyTo *endpoint
+		ok                  bool
+	)
+	if !derpNodeSrc.IsZero() {
+		// The node is unambiguous, as the disco message arrived over DERP,
+		// and DERP src is node key.
+		maybeSendDiscoKeyTo, ok = c.peerMap.endpointForNodeKey(derpNodeSrc)
+	} else {
+		// The node is ambiguous, but we make it unambiguous through [epAddr]
+		// lookup in the [peerMap]. The sender of the disco message that
+		// failed to open was sourced from [epAddr], which can map to an
+		// [endpoint]. Writes into the [peerMap] by [epAddr] only occur upon
+		// successful disco transaction over the address, or a
+		// WireGuard-authenticated round trip of [lazyEndpoint] through
+		// wireguard-go. Since we've arrived here due to disco open failure,
+		// this is likely the latter.
+		maybeSendDiscoKeyTo, ok = c.peerMap.endpointForEpAddr(src)
+	}
+	if ok {
+		c.maybeSendTSMPDiscoAdvert(maybeSendDiscoKeyTo)
+	}
+}
+
 // handleDiscoMessage handles a discovery message. The caller is assumed to have
 // verified 'msg' returns [packetLooksLikeDisco] from packetLooksLike().
 //
@@ -2230,6 +2257,7 @@ func (c *Conn) handleDiscoMessage(msg []byte, src epAddr, shouldBeRelayHandshake
 		if debugDisco() {
 			c.logf("magicsock: disco: ignoring disco-looking frame, don't know of key %v", sender.ShortString())
 		}
+		c.handleDiscoOpenFailOrUnknownSender(src, derpNodeSrc)
 		return
 	}
 
@@ -2263,6 +2291,7 @@ func (c *Conn) handleDiscoMessage(msg []byte, src epAddr, shouldBeRelayHandshake
 		}
 
 		metricRecvDiscoBadKey.Add(1)
+		c.handleDiscoOpenFailOrUnknownSender(src, derpNodeSrc)
 		return
 	}
 
@@ -2674,8 +2703,6 @@ func (c *Conn) enqueueCallMeMaybe(derpAddr netip.AddrPort, de *endpoint) {
 		go c.ReSTUN("refresh-for-peering")
 		return
 	}
-
-	c.maybeSendTSMPDiscoAdvert(de)
 
 	eps := make([]netip.AddrPort, 0, len(c.lastEndpoints))
 	for _, ep := range c.lastEndpoints {
@@ -4543,8 +4570,7 @@ func (c *Conn) maybeSendTSMPDiscoAdvert(de *endpoint) {
 	}
 
 	now := mono.Now()
-	if now.Sub(de.lastDiscoKeyAdvertisement) <= discoKeyAdvertisementInterval ||
-		(!de.lastDiscoKeyAdvertisement.IsZero() && de.bestAddr.isDirect()) {
+	if !de.lastDiscoKeyAdvertisement.IsZero() && now.Sub(de.lastDiscoKeyAdvertisement) <= discoKeyAdvertisementInterval {
 		return
 	}
 
