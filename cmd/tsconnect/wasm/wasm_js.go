@@ -6,15 +6,19 @@
 //
 // When run in the browser, a newIPN(config) function is added to the global JS
 // namespace. When called it returns an ipn object with the methods
-// run(callbacks), login(), logout(), and ssh(...).
+// run(callbacks), login(), logout(), ssh(...), fetch(...), configure(...),
+// and lookup(...).
 package main
 
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand/v2"
 	"net"
@@ -34,6 +38,7 @@ import (
 	"tailscale.com/logpolicy"
 	"tailscale.com/logtail"
 	"tailscale.com/net/netns"
+	"tailscale.com/net/tsaddr"
 	"tailscale.com/net/tsdial"
 	"tailscale.com/safesocket"
 	"tailscale.com/tailcfg"
@@ -201,12 +206,24 @@ func newIPN(jsConfig js.Value) map[string]any {
 		}),
 		"fetch": js.FuncOf(func(this js.Value, args []js.Value) any {
 			if len(args) != 1 {
-				log.Printf("Usage: fetch(url)")
+				log.Printf("Usage: fetch(url | request)")
 				return nil
 			}
-
-			url := args[0].String()
-			return jsIPN.fetch(url)
+			return jsIPN.fetch(args[0])
+		}),
+		"configure": js.FuncOf(func(this js.Value, args []js.Value) any {
+			if len(args) != 1 {
+				log.Printf("Usage: configure(config)")
+				return nil
+			}
+			return jsIPN.configure(args[0])
+		}),
+		"lookup": js.FuncOf(func(this js.Value, args []js.Value) any {
+			if len(args) < 1 {
+				log.Printf("Usage: lookup(hostname)")
+				return nil
+			}
+			return jsIPN.lookup(args[0].String())
 		}),
 	}
 }
@@ -291,8 +308,10 @@ func (i *jsIPN) run(jsCallbacks js.Value) {
 								MachineKey: p.Machine().String(),
 								NodeKey:    p.Key().String(),
 							},
+							ID:                  string(p.StableID()),
 							Online:              p.Online().Clone(),
 							TailscaleSSHEnabled: p.Hostinfo().TailscaleSSHEnabled(),
+							ExitNodeOption:      tsaddr.ContainsExitRoutes(p.AllowedIPs()),
 						}
 					}),
 					LockedOut: nm.TKAEnabled && nm.SelfNode.KeySignature().Len() == 0,
@@ -507,32 +526,228 @@ func (s *jsSSHSession) Resize(rows, cols int) error {
 	return s.session.WindowChange(rows, cols)
 }
 
-func (i *jsIPN) fetch(url string) js.Value {
-	return makePromise(func() (any, error) {
-		c := &http.Client{
-			Transport: &http.Transport{
-				DialContext: i.dialer.UserDial,
-			},
+// fetch handles both simple URL string fetches and structured request objects.
+// When the argument is a JS object, it reads: url, method, headers, bodyBase64,
+// redirect, and tlsServerName. The tlsServerName field allows the caller to
+// rewrite a URL to an IP address while still providing the original hostname
+// for TLS SNI verification.
+func (i *jsIPN) fetch(arg js.Value) js.Value {
+	return makePromise(func() (result any, retErr error) {
+		defer func() {
+			if r := recover(); r != nil {
+				retErr = fmt.Errorf("panic in fetch: %v", r)
+			}
+		}()
+
+		var (
+			fetchURL      string
+			method        = "GET"
+			headers       = make(map[string]string)
+			bodyBytes     []byte
+			redirect      = "follow"
+			tlsServerName string
+		)
+
+		if arg.Type() == js.TypeString {
+			fetchURL = arg.String()
+		} else {
+			fetchURL = arg.Get("url").String()
+			if jsMethod := arg.Get("method"); !jsMethod.IsUndefined() && jsMethod.String() != "" {
+				method = jsMethod.String()
+			}
+			if jsHeaders := arg.Get("headers"); !jsHeaders.IsUndefined() && jsHeaders.Type() == js.TypeObject {
+				keys := js.Global().Get("Object").Call("keys", jsHeaders)
+				keysLen := keys.Length()
+				for idx := range keysLen {
+					key := keys.Index(idx).String()
+					val := jsHeaders.Get(key).String()
+					headers[key] = val
+				}
+			}
+			if jsBody := arg.Get("bodyBase64"); !jsBody.IsUndefined() && jsBody.String() != "" {
+				decoded, err := base64.StdEncoding.DecodeString(jsBody.String())
+				if err == nil {
+					bodyBytes = decoded
+				}
+			}
+			if jsRedirect := arg.Get("redirect"); !jsRedirect.IsUndefined() && jsRedirect.String() != "" {
+				redirect = jsRedirect.String()
+			}
+			if jsTLS := arg.Get("tlsServerName"); !jsTLS.IsUndefined() && jsTLS.String() != "" {
+				tlsServerName = jsTLS.String()
+			}
 		}
-		res, err := c.Get(url)
+
+		var bodyReader io.Reader
+		if bodyBytes != nil {
+			bodyReader = bytes.NewReader(bodyBytes)
+		}
+
+		if tlsServerName != "" {
+			log.Printf("FETCH: %s %s (tlsServerName=%q)", method, fetchURL, tlsServerName)
+		} else {
+			log.Printf("FETCH: %s %s", method, fetchURL)
+		}
+
+		req, err := http.NewRequest(method, fetchURL, bodyReader)
+		if err != nil {
+			return nil, err
+		}
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+
+		transport := &http.Transport{
+			DialContext: i.dialer.UserDial,
+		}
+		if tlsServerName != "" {
+			transport.TLSClientConfig = &tls.Config{
+				ServerName: tlsServerName,
+			}
+		}
+
+		client := &http.Client{
+			Transport: transport,
+			Timeout:   60 * time.Second,
+		}
+		if redirect == "manual" || redirect == "error" {
+			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			}
+		}
+
+		res, err := client.Do(req)
+		if err != nil {
+			log.Printf("FETCH ERROR: %s %s: %v", method, fetchURL, err)
+			return nil, err
+		}
+		defer res.Body.Close()
+		log.Printf("FETCH RESPONSE: %s %s -> %d", method, fetchURL, res.StatusCode)
+
+		body, err := io.ReadAll(res.Body)
+		if err != nil {
+			return nil, fmt.Errorf("reading response body: %w", err)
+		}
+		bodyBase64 := base64.StdEncoding.EncodeToString(body)
+
+		respHeaders := make(map[string]any)
+		for k, v := range res.Header {
+			if len(v) > 0 {
+				respHeaders[strings.ToLower(k)] = v[0]
+			}
+		}
+
+		finalURL := fetchURL
+		if res.Request != nil && res.Request.URL != nil {
+			finalURL = res.Request.URL.String()
+		}
+
+		return map[string]any{
+			"url":        finalURL,
+			"status":     res.StatusCode,
+			"statusText": res.Status,
+			"headers":    respHeaders,
+			"bodyBase64": bodyBase64,
+			"text": js.FuncOf(func(this js.Value, args []js.Value) any {
+				return makePromise(func() (any, error) {
+					return string(body), nil
+				})
+			}),
+		}, nil
+	})
+}
+
+// configure updates the Tailscale backend preferences at runtime.
+func (i *jsIPN) configure(jsConfig js.Value) js.Value {
+	return makePromise(func() (any, error) {
+		mp := &ipn.MaskedPrefs{}
+
+		if v := jsConfig.Get("routeAll"); !v.IsUndefined() {
+			mp.Prefs.RouteAll = v.Bool()
+			mp.RouteAllSet = true
+		} else if v := jsConfig.Get("RouteAll"); !v.IsUndefined() {
+			mp.Prefs.RouteAll = v.Bool()
+			mp.RouteAllSet = true
+		}
+
+		if v := jsConfig.Get("corpDns"); !v.IsUndefined() {
+			mp.Prefs.CorpDNS = v.Bool()
+			mp.CorpDNSSet = true
+		} else if v := jsConfig.Get("corpDNS"); !v.IsUndefined() {
+			mp.Prefs.CorpDNS = v.Bool()
+			mp.CorpDNSSet = true
+		} else if v := jsConfig.Get("CorpDNS"); !v.IsUndefined() {
+			mp.Prefs.CorpDNS = v.Bool()
+			mp.CorpDNSSet = true
+		} else if v := jsConfig.Get("acceptDns"); !v.IsUndefined() {
+			mp.Prefs.CorpDNS = v.Bool()
+			mp.CorpDNSSet = true
+		}
+
+		exitNodeID := ""
+		if v := jsConfig.Get("exitNodeId"); !v.IsUndefined() && v.Type() == js.TypeString {
+			exitNodeID = v.String()
+		} else if v := jsConfig.Get("exitNodeID"); !v.IsUndefined() && v.Type() == js.TypeString {
+			exitNodeID = v.String()
+		} else if v := jsConfig.Get("ExitNodeID"); !v.IsUndefined() && v.Type() == js.TypeString {
+			exitNodeID = v.String()
+		}
+		if exitNodeID != "" {
+			mp.Prefs.ExitNodeID = tailcfg.StableNodeID(exitNodeID)
+			mp.ExitNodeIDSet = true
+		}
+
+		log.Printf("CONFIGURE: RouteAll=%v (set=%v), ExitNodeID=%q (set=%v), CorpDNS=%v (set=%v)",
+			mp.Prefs.RouteAll, mp.RouteAllSet,
+			mp.Prefs.ExitNodeID, mp.ExitNodeIDSet,
+			mp.Prefs.CorpDNS, mp.CorpDNSSet)
+
+		_, err := i.lb.EditPrefs(mp)
+		if err != nil {
+			log.Printf("CONFIGURE ERROR: %v", err)
+		} else {
+			log.Printf("CONFIGURE OK")
+		}
+		return nil, err
+	})
+}
+
+// lookup resolves a hostname through the Tailscale network stack.
+func (i *jsIPN) lookup(hostname string) js.Value {
+	return makePromise(func() (result any, retErr error) {
+		defer func() {
+			if r := recover(); r != nil {
+				retErr = fmt.Errorf("panic in lookup: %v", r)
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		addrs, err := net.DefaultResolver.LookupHost(ctx, hostname)
 		if err != nil {
 			return nil, err
 		}
 
+		jsAddrs := make([]any, 0, len(addrs))
+		for _, addr := range addrs {
+			ip, err := netip.ParseAddr(addr)
+			if err != nil {
+				continue
+			}
+			family := 4
+			if ip.Is6() {
+				family = 6
+			}
+			jsAddrs = append(jsAddrs, map[string]any{
+				"address": addr,
+				"family":  family,
+			})
+		}
+
 		return map[string]any{
-			"status":     res.StatusCode,
-			"statusText": res.Status,
-			"text": js.FuncOf(func(this js.Value, args []js.Value) any {
-				return makePromise(func() (any, error) {
-					defer res.Body.Close()
-					buf := new(bytes.Buffer)
-					if _, err := buf.ReadFrom(res.Body); err != nil {
-						return nil, err
-					}
-					return buf.String(), nil
-				})
-			}),
-			// TODO: populate a more complete JS Response object
+			"hostname":  hostname,
+			"addresses": jsAddrs,
 		}, nil
 	})
 }
@@ -567,8 +782,10 @@ type jsNetMapSelfNode struct {
 
 type jsNetMapPeerNode struct {
 	jsNetMapNode
-	Online              *bool `json:"online,omitempty"`
-	TailscaleSSHEnabled bool  `json:"tailscaleSSHEnabled"`
+	ID                  string `json:"id"`
+	Online              *bool  `json:"online,omitempty"`
+	TailscaleSSHEnabled bool   `json:"tailscaleSSHEnabled"`
+	ExitNodeOption      bool   `json:"exitNodeOption"`
 }
 
 type jsStateStore struct {
