@@ -594,6 +594,10 @@ func (i *jsIPN) fetch(arg js.Value) js.Value {
 			return nil, err
 		}
 		for k, v := range headers {
+			if strings.EqualFold(k, "host") {
+				req.Host = v
+				continue
+			}
 			req.Header.Set(k, v)
 		}
 

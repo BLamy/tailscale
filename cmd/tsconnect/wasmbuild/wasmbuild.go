@@ -63,16 +63,16 @@ var baseTags = []string{
 //     applicable to a browser-hosted client.
 //   - "aws", "cloud", "kube", "bird", "appconnectors", "conn25",
 //     "relayserver", "serve", "acme", "tap", "tpm", "doctor",
-//     "advertiseroutes", "advertiseexitnode", "useroutes",
-//     "useexitnode": server-side or otherwise out of scope for the
-//     SSH-in-browser / fetch-in-browser use case.
+//     "advertiseroutes", "advertiseexitnode": server-side or otherwise out
+//     of scope for the SSH-in-browser / fetch-in-browser use case.
 var Keep = []featuretags.FeatureTag{
-	"c2n",      // control-to-node mechanism the control client invokes
-	"dns",      // MagicDNS resolution in-process
-	"health",   // ipnstate/ipnlocal reference health warnables pervasively
-	"ipnbus",   // notification bus for state/netmap callbacks
-	"logtail",  // log upload (browser console + remote)
-	"netstack", // userspace networking; wasm has no kernel TUN
+	"c2n",         // control-to-node mechanism the control client invokes
+	"dns",         // MagicDNS resolution in-process
+	"health",      // ipnstate/ipnlocal reference health warnables pervasively
+	"ipnbus",      // notification bus for state/netmap callbacks
+	"logtail",     // log upload (browser console + remote)
+	"netstack",    // userspace networking; wasm has no kernel TUN
+	"useexitnode", // route browser-originated fetches through a tailnet exit node
 }
 
 func init() {
